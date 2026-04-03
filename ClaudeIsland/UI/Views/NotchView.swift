@@ -567,22 +567,16 @@ struct NotchView: View {
             if let pid = session.pid {
                 let success = await YabaiController.shared.focusWindow(forClaudePid: pid)
                 if success {
-                    viewModel.notchClose()
+                    await MainActor.run { viewModel.notchClose() }
                     return
                 }
             }
 
-            // Fallback: find and activate the terminal app via process tree
+            // Use CGWindowList to find the correct terminal window by PID or title
             await MainActor.run {
-                if let pid = session.pid {
-                    let tree = ProcessTreeBuilder.shared.buildTree()
-                    if let termPid = ProcessTreeBuilder.shared.findTerminalPid(forProcess: pid, tree: tree) {
-                        // Activate the terminal app by its PID
-                        let app = NSRunningApplication(processIdentifier: pid_t(termPid))
-                        app?.activate()
-                        viewModel.notchClose()
-                        return
-                    }
+                if focusTerminalWindow(for: session) {
+                    viewModel.notchClose()
+                    return
                 }
 
                 // Last resort: activate any Ghostty instance
@@ -593,6 +587,83 @@ struct NotchView: View {
                     ghostty.activate()
                     viewModel.notchClose()
                 }
+            }
+        }
+    }
+
+    /// Find and focus the correct terminal window using CGWindowList + Accessibility API
+    @MainActor
+    private func focusTerminalWindow(for session: SessionState) -> Bool {
+        let projectName = session.cwd.components(separatedBy: "/").last ?? ""
+        guard !projectName.isEmpty else { return false }
+
+        // Get all on-screen windows
+        guard let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return false }
+
+        // Find terminal windows whose title contains the project name or session ID
+        let sessionPrefix = String(session.sessionId.prefix(8))
+        var targetPid: pid_t?
+        var targetWindowNumber: CGWindowID?
+
+        for window in windowList {
+            guard let ownerName = window[kCGWindowOwnerName as String] as? String,
+                  let windowPid = window[kCGWindowOwnerPID as String] as? Int,
+                  let layer = window[kCGWindowLayer as String] as? Int,
+                  layer == 0,
+                  TerminalAppRegistry.isTerminal(ownerName) else { continue }
+
+            let title = window[kCGWindowName as String] as? String ?? ""
+
+            // Match by session ID prefix in title (set via OSC2) or project name
+            if title.contains(sessionPrefix) || title.contains(projectName) {
+                targetPid = pid_t(windowPid)
+                targetWindowNumber = window[kCGWindowNumber as String] as? CGWindowID
+                break
+            }
+        }
+
+        // If we found a matching window, activate the app and raise the window
+        if let targetPid {
+            let app = NSRunningApplication(processIdentifier: targetPid)
+            app?.activate()
+
+            // Use Accessibility API to raise the specific window
+            if let windowNumber = targetWindowNumber {
+                raiseWindow(pid: targetPid, windowNumber: windowNumber, projectName: projectName, sessionPrefix: sessionPrefix)
+            }
+            return true
+        }
+
+        // Fallback: find by process tree PID
+        if let claudePid = session.pid {
+            let tree = ProcessTreeBuilder.shared.buildTree()
+            if let termPid = ProcessTreeBuilder.shared.findTerminalPid(forProcess: claudePid, tree: tree) {
+                let app = NSRunningApplication(processIdentifier: pid_t(termPid))
+                app?.activate()
+                return true
+            }
+        }
+
+        return false
+    }
+
+    /// Raise a specific window using Accessibility API
+    private func raiseWindow(pid: pid_t, windowNumber: CGWindowID, projectName: String, sessionPrefix: String) {
+        let axApp = AXUIElementCreateApplication(pid)
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let axWindows = windowsRef as? [AXUIElement] else { return }
+
+        for axWindow in axWindows {
+            var titleRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(axWindow, kAXTitleAttribute as CFString, &titleRef)
+            let title = titleRef as? String ?? ""
+
+            if title.contains(sessionPrefix) || title.contains(projectName) {
+                AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
+                return
             }
         }
     }
