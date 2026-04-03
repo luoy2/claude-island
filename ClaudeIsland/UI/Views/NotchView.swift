@@ -404,46 +404,48 @@ struct NotchView: View {
         let projectName = lastCompletedSession?.cwd.components(separatedBy: "/").last ?? "Session"
         let message = lastCompletedSession?.lastStopMessage ?? lastCompletedSession?.lastMessage
 
-        HStack(spacing: 12) {
-            CompanionIcon(
-                species: companion?.species ?? "octopus",
-                size: 36,
-                color: TerminalColors.green
-            )
+        VStack(alignment: .leading, spacing: 0) {
+            // Header: companion + project name + jump button
+            HStack(spacing: 10) {
+                CompanionIcon(
+                    species: companion?.species ?? "octopus",
+                    size: 28,
+                    color: TerminalColors.green
+                )
 
-            VStack(alignment: .leading, spacing: 4) {
                 Text(projectName)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 15, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
-                    .lineLimit(1)
 
-                if let message, !message.isEmpty {
-                    Text(message)
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.6))
-                        .lineLimit(3)
-                } else {
-                    Text("Done!")
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.5))
+                Spacer()
+
+                Image(systemName: "arrow.up.right.square")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+            .padding(.bottom, 12)
+
+            // Message body — markdown rendered
+            if let message, !message.isEmpty {
+                ScrollView {
+                    MarkdownText(message, color: .white.opacity(0.75), fontSize: 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            } else {
+                Text("Done!")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white.opacity(0.4))
             }
 
-            Spacer()
-
-            // Jump to terminal button
-            Image(systemName: "arrow.up.right.square")
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.4))
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .contentShape(Rectangle())
         .onTapGesture {
             focusSessionTerminal()
         }
-        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+        .transition(.opacity.combined(with: .scale(scale: 0.95)))
     }
 
     // MARK: - Immersive Approval View

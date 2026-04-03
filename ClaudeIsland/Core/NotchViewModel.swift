@@ -72,11 +72,11 @@ class NotchViewModel: ObservableObject {
             )
         }
 
-        // Compact size for companion completion popup
+        // Completion notification — generous size for markdown content
         if openReason == .notification {
             return CGSize(
-                width: min(screenRect.width * 0.35, 380),
-                height: 160
+                width: min(screenRect.width * 0.45, 500),
+                height: 280
             )
         }
 
