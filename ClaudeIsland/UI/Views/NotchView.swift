@@ -427,11 +427,59 @@ struct NotchView: View {
             }
 
             Spacer()
+
+            // Jump to terminal button
+            Image(systemName: "arrow.up.right.square")
+                .font(.system(size: 14))
+                .foregroundColor(.white.opacity(0.4))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            focusSessionTerminal()
+        }
         .transition(.opacity.combined(with: .scale(scale: 0.8)))
+    }
+
+    /// Focus the terminal app for the completed session
+    private func focusSessionTerminal() {
+        guard let session = lastCompletedSession else { return }
+
+        Task {
+            // Try yabai first (for tmux pane switching)
+            if let pid = session.pid {
+                let success = await YabaiController.shared.focusWindow(forClaudePid: pid)
+                if success {
+                    viewModel.notchClose()
+                    return
+                }
+            }
+
+            // Fallback: find and activate the terminal app via process tree
+            await MainActor.run {
+                if let pid = session.pid {
+                    let tree = ProcessTreeBuilder.shared.buildTree()
+                    if let termPid = ProcessTreeBuilder.shared.findTerminalPid(forProcess: pid, tree: tree) {
+                        // Activate the terminal app by its PID
+                        let app = NSRunningApplication(processIdentifier: pid_t(termPid))
+                        app?.activate()
+                        viewModel.notchClose()
+                        return
+                    }
+                }
+
+                // Last resort: activate any Ghostty instance
+                let ghosttyApps = NSWorkspace.shared.runningApplications.filter {
+                    $0.bundleIdentifier == "com.mitchellh.ghostty"
+                }
+                if let ghostty = ghosttyApps.first {
+                    ghostty.activate()
+                    viewModel.notchClose()
+                }
+            }
+        }
     }
 
     // MARK: - Event Handlers
