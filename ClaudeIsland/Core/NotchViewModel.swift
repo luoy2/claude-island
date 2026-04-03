@@ -45,6 +45,7 @@ class NotchViewModel: ObservableObject {
     @Published var openReason: NotchOpenReason = .unknown
     @Published var contentType: NotchContentType = .instances
     @Published var isHovering: Bool = false
+    @Published var hasPendingPermission: Bool = false
 
     // MARK: - Dependencies
 
@@ -63,6 +64,22 @@ class NotchViewModel: ObservableObject {
 
     /// Dynamic opened size based on content type
     var openedSize: CGSize {
+        // Permission approval — wider panel for approve/deny buttons
+        if openReason == .notification && hasPendingPermission {
+            return CGSize(
+                width: min(screenRect.width * 0.45, 500),
+                height: 350
+            )
+        }
+
+        // Compact size for companion completion popup
+        if openReason == .notification {
+            return CGSize(
+                width: min(screenRect.width * 0.35, 380),
+                height: 160
+            )
+        }
+
         switch contentType {
         case .chat:
             // Large size for chat view

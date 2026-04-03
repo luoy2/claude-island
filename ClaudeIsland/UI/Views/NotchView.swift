@@ -22,7 +22,11 @@ struct NotchView: View {
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var previousPendingIds: Set<String> = []
     @State private var previousWaitingForInputIds: Set<String> = []
+    @State private var previousActiveIds: Set<String> = []  // Track active sessions for completion detection
     @State private var waitingForInputTimestamps: [String: Date] = [:]  // sessionId -> when it entered waitingForInput
+    @State private var completionTimestamps: [String: Date] = [:]  // sessionId -> when it completed
+    @State private var lastCompletedSession: SessionState? = nil
+    @State private var companion: Companion? = nil
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
@@ -52,6 +56,13 @@ struct NotchView: View {
             }
             return false
         }
+    }
+
+    /// Whether any session recently completed (for companion notification)
+    private var hasRecentCompletion: Bool {
+        let now = Date()
+        let displayDuration: TimeInterval = 8  // Show companion for 8 seconds
+        return completionTimestamps.values.contains { now.timeIntervalSince($0) < displayDuration }
     }
 
     // MARK: - Sizing
@@ -202,8 +213,16 @@ struct NotchView: View {
             handlePendingSessionsChange(sessions)
         }
         .onChange(of: sessionMonitor.instances) { _, instances in
+            viewModel.hasPendingPermission = hasPendingPermission
             handleProcessingChange()
             handleWaitingForInputChange(instances)
+            handleSessionCompletion(instances)
+        }
+        .onChange(of: sessionMonitor.pendingInstances) { _, _ in
+            viewModel.hasPendingPermission = hasPendingPermission
+        }
+        .task {
+            companion = await CompanionService.shared.getCompanion()
         }
     }
 
@@ -213,9 +232,9 @@ struct NotchView: View {
         activityCoordinator.expandingActivity.show && activityCoordinator.expandingActivity.type == .claude
     }
 
-    /// Whether to show the expanded closed state (processing, pending permission, or waiting for input)
+    /// Whether to show the expanded closed state (processing, pending permission, waiting for input, or recent completion)
     private var showClosedActivity: Bool {
-        isProcessing || hasPendingPermission || hasWaitingForInput
+        isProcessing || hasPendingPermission || hasWaitingForInput || hasRecentCompletion
     }
 
     @ViewBuilder
@@ -278,7 +297,7 @@ struct NotchView: View {
                     .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0))
             }
 
-            // Right side - spinner when processing/pending, checkmark when waiting for input
+            // Right side - spinner when processing/pending, checkmark when waiting, companion on completion
             if showClosedActivity {
                 if isProcessing || hasPendingPermission {
                     ProcessingSpinner()
@@ -287,6 +306,10 @@ struct NotchView: View {
                 } else if hasWaitingForInput {
                     // Checkmark for waiting-for-input on the right side
                     ReadyForInputIndicatorIcon(size: 14, color: TerminalColors.green)
+                        .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
+                        .frame(width: viewModel.status == .opened ? 20 : sideWidth)
+                } else if hasRecentCompletion, let companion {
+                    CompanionIcon(species: companion.species, size: 16, color: TerminalColors.green)
                         .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
                         .frame(width: viewModel.status == .opened ? 20 : sideWidth)
                 }
@@ -348,25 +371,67 @@ struct NotchView: View {
     @ViewBuilder
     private var contentView: some View {
         Group {
-            switch viewModel.contentType {
-            case .instances:
-                ClaudeInstancesView(
-                    sessionMonitor: sessionMonitor,
-                    viewModel: viewModel
-                )
-            case .menu:
-                NotchMenuView(viewModel: viewModel)
-            case .chat(let session):
-                ChatView(
-                    sessionId: session.sessionId,
-                    initialSession: session,
-                    sessionMonitor: sessionMonitor,
-                    viewModel: viewModel
-                )
+            if viewModel.openReason == .notification && hasRecentCompletion && !hasPendingPermission {
+                // Companion completion popup (no pending permission)
+                companionNotificationView
+            } else {
+                switch viewModel.contentType {
+                case .instances:
+                    ClaudeInstancesView(
+                        sessionMonitor: sessionMonitor,
+                        viewModel: viewModel
+                    )
+                case .menu:
+                    NotchMenuView(viewModel: viewModel)
+                case .chat(let session):
+                    ChatView(
+                        sessionId: session.sessionId,
+                        initialSession: session,
+                        sessionMonitor: sessionMonitor,
+                        viewModel: viewModel
+                    )
+                }
             }
         }
-        .frame(width: notchSize.width - 24) // Fixed width to prevent text reflow
-        // Removed .id() - was causing view recreation and performance issues
+        .frame(width: notchSize.width - 24)
+    }
+
+    @ViewBuilder
+    private var companionNotificationView: some View {
+        let projectName = lastCompletedSession?.cwd.components(separatedBy: "/").last ?? "Session"
+        let message = lastCompletedSession?.lastMessage
+
+        HStack(spacing: 12) {
+            CompanionIcon(
+                species: companion?.species ?? "octopus",
+                size: 36,
+                color: TerminalColors.green
+            )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(projectName)
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+
+                if let message, !message.isEmpty {
+                    Text(message)
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(3)
+                } else {
+                    Text("Done!")
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+        .transition(.opacity.combined(with: .scale(scale: 0.8)))
     }
 
     // MARK: - Event Handlers
@@ -376,8 +441,8 @@ struct NotchView: View {
             // Show claude activity when processing or waiting for permission
             activityCoordinator.showActivity(type: .claude)
             isVisible = true
-        } else if hasWaitingForInput {
-            // Keep visible for waiting-for-input but hide the processing spinner
+        } else if hasWaitingForInput || hasRecentCompletion {
+            // Keep visible for waiting-for-input or recent completion (companion notification)
             activityCoordinator.hideActivity()
             isVisible = true
         } else {
@@ -405,6 +470,15 @@ struct NotchView: View {
                 waitingForInputTimestamps.removeAll()
             }
         case .closed:
+            // Re-open if there's a pending permission — user must approve/deny
+            if hasPendingPermission {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    if hasPendingPermission {
+                        viewModel.notchOpen(reason: .notification)
+                    }
+                }
+                return
+            }
             // Don't hide on non-notched devices - users need a visible target
             guard viewModel.hasPhysicalNotch else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -419,10 +493,14 @@ struct NotchView: View {
         let currentIds = Set(sessions.map { $0.stableId })
         let newPendingIds = currentIds.subtracting(previousPendingIds)
 
-        if !newPendingIds.isEmpty &&
-           viewModel.status == .closed &&
-           !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
+        // Always auto-expand for permission requests — user needs to approve/deny
+        if !newPendingIds.isEmpty && viewModel.status != .opened {
             viewModel.notchOpen(reason: .notification)
+
+            // Play sound to alert
+            if let soundName = AppSettings.notificationSound.soundName {
+                NSSound(named: soundName)?.play()
+            }
         }
 
         previousPendingIds = currentIds
@@ -499,5 +577,57 @@ struct NotchView: View {
         }
 
         return false
+    }
+
+    // MARK: - Session Completion Detection
+
+    private func handleSessionCompletion(_ instances: [SessionState]) {
+        // Active = processing or compacting
+        let activeIds = Set(
+            instances
+                .filter { $0.phase == .processing || $0.phase == .compacting }
+                .map { $0.stableId }
+        )
+
+        // Sessions that were active but are now idle = just completed
+        let completedIds = previousActiveIds.subtracting(activeIds)
+
+        if !completedIds.isEmpty {
+            let now = Date()
+            for id in completedIds {
+                completionTimestamps[id] = now
+            }
+
+            // Store the completed session for notification display
+            let completedSessions = instances.filter { completedIds.contains($0.stableId) }
+            if let session = completedSessions.first {
+                lastCompletedSession = session
+            }
+
+            // Play custom completion sound (Logic Pro jingle)
+            if let soundURL = Bundle.main.url(forResource: "cc_done", withExtension: "wav") {
+                NSSound(contentsOf: soundURL, byReference: true)?.play()
+            } else if let soundName = AppSettings.notificationSound.soundName {
+                NSSound(named: soundName)?.play()
+            }
+
+            // Always open notch to show companion notification
+            if viewModel.status != .opened || viewModel.openReason != .click {
+                viewModel.notchOpen(reason: .notification)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak viewModel] in
+                    guard let viewModel, viewModel.openReason == .notification else { return }
+                    viewModel.notchClose()
+                }
+            }
+
+            // Auto-cleanup completion timestamps after display window
+            DispatchQueue.main.asyncAfter(deadline: .now() + 9.0) { [self] in
+                let cutoff = Date().addingTimeInterval(-8)
+                completionTimestamps = completionTimestamps.filter { $0.value > cutoff }
+                handleProcessingChange()
+            }
+        }
+
+        previousActiveIds = activeIds
     }
 }
