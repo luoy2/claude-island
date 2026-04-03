@@ -47,6 +47,9 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     var conversationInfo: ConversationInfo
 
+    /// Last message from Stop event (direct from hook, not JSONL)
+    var lastStopMessage: String?
+
     // MARK: - Clear Reconciliation
 
     /// When true, the next file update should reconcile chatItems with parser state

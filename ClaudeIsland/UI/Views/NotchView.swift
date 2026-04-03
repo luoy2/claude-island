@@ -371,8 +371,11 @@ struct NotchView: View {
     @ViewBuilder
     private var contentView: some View {
         Group {
-            if viewModel.openReason == .notification && hasRecentCompletion && !hasPendingPermission {
-                // Companion completion popup (no pending permission)
+            if hasPendingPermission {
+                // Immersive approval view — focused on the permission request
+                approvalQueueView
+            } else if viewModel.openReason == .notification && hasRecentCompletion {
+                // Companion completion popup
                 companionNotificationView
             } else {
                 switch viewModel.contentType {
@@ -399,7 +402,7 @@ struct NotchView: View {
     @ViewBuilder
     private var companionNotificationView: some View {
         let projectName = lastCompletedSession?.cwd.components(separatedBy: "/").last ?? "Session"
-        let message = lastCompletedSession?.lastMessage
+        let message = lastCompletedSession?.lastStopMessage ?? lastCompletedSession?.lastMessage
 
         HStack(spacing: 12) {
             CompanionIcon(
@@ -441,6 +444,118 @@ struct NotchView: View {
             focusSessionTerminal()
         }
         .transition(.opacity.combined(with: .scale(scale: 0.8)))
+    }
+
+    // MARK: - Immersive Approval View
+
+    @ViewBuilder
+    private var approvalQueueView: some View {
+        let pendingSessions = sessionMonitor.instances.filter { $0.phase.isWaitingForApproval }
+
+        ScrollView {
+            VStack(spacing: 12) {
+                ForEach(pendingSessions, id: \.sessionId) { session in
+                    approvalCard(for: session)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func approvalCard(for session: SessionState) -> some View {
+        let projectName = session.cwd.components(separatedBy: "/").last ?? "Session"
+        let toolName = session.activePermission?.toolName ?? "Unknown"
+        let toolInput = formatToolInput(session.activePermission?.toolInput)
+
+        VStack(alignment: .leading, spacing: 10) {
+            // Header: project name
+            HStack {
+                Circle()
+                    .fill(Color(red: 0.85, green: 0.47, blue: 0.34))
+                    .frame(width: 8, height: 8)
+                Text(projectName)
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                Spacer()
+                Text(toolName)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(Color(red: 0.85, green: 0.47, blue: 0.34))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color(red: 0.85, green: 0.47, blue: 0.34).opacity(0.15))
+                    .cornerRadius(4)
+            }
+
+            // Tool input details
+            if !toolInput.isEmpty {
+                Text(toolInput)
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.7))
+                    .lineLimit(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(6)
+            }
+
+            // Action buttons
+            HStack(spacing: 10) {
+                Spacer()
+
+                Button {
+                    sessionMonitor.denyPermission(sessionId: session.sessionId, reason: nil)
+                } label: {
+                    Text("Deny")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    sessionMonitor.approvePermission(sessionId: session.sessionId)
+                } label: {
+                    Text("Allow")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Color.white)
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.04))
+        .cornerRadius(10)
+        .padding(.horizontal, 4)
+    }
+
+    private func formatToolInput(_ input: [String: AnyCodable]?) -> String {
+        guard let input else { return "" }
+
+        // Try common patterns
+        if let command = input["command"]?.value as? String {
+            return command
+        }
+        if let filePath = input["file_path"]?.value as? String {
+            return filePath
+        }
+        if let patterns = input["patterns"]?.value as? [Any], let first = patterns.first as? String {
+            return first
+        }
+
+        // Fallback: serialize to readable string
+        if let data = try? JSONSerialization.data(withJSONObject: input.mapValues { $0.value }, options: .prettyPrinted),
+           let str = String(data: data, encoding: .utf8) {
+            return str
+        }
+        return ""
     }
 
     /// Focus the terminal app for the completed session

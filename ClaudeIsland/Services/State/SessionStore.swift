@@ -153,6 +153,9 @@ actor SessionStore {
 
         if event.event == "Stop" {
             session.subagentState = SubagentState()
+            if let msg = event.message, !msg.isEmpty {
+                session.lastStopMessage = msg
+            }
         }
 
         sessions[sessionId] = session

@@ -174,6 +174,9 @@ def main():
 
     elif event == "Stop":
         state["status"] = "waiting_for_input"
+        last_msg = data.get("last_assistant_message") or data.get("message")
+        if last_msg:
+            state["message"] = last_msg
 
     elif event == "SubagentStop":
         # SubagentStop fires when a subagent completes - usually means back to waiting
