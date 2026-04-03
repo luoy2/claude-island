@@ -132,19 +132,17 @@ def main():
             decision = response.get("decision", "ask")
             reason = response.get("reason", "")
 
-            if decision == "allow":
-                # Output JSON to approve
+            if decision in ("allow", "always"):
                 output = {
                     "hookSpecificOutput": {
                         "hookEventName": "PermissionRequest",
-                        "decision": {"behavior": "allow"},
+                        "decision": {"behavior": decision},
                     }
                 }
                 print(json.dumps(output))
                 sys.exit(0)
 
             elif decision == "deny":
-                # Output JSON to deny
                 output = {
                     "hookSpecificOutput": {
                         "hookEventName": "PermissionRequest",

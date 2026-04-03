@@ -448,12 +448,14 @@ struct NotchView: View {
 
     // MARK: - Immersive Approval View
 
+    private let approvalOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
+
     @ViewBuilder
     private var approvalQueueView: some View {
         let pendingSessions = sessionMonitor.instances.filter { $0.phase.isWaitingForApproval }
 
         ScrollView {
-            VStack(spacing: 12) {
+            VStack(spacing: 16) {
                 ForEach(pendingSessions, id: \.sessionId) { session in
                     approvalCard(for: session)
                 }
@@ -466,52 +468,70 @@ struct NotchView: View {
     private func approvalCard(for session: SessionState) -> some View {
         let projectName = session.cwd.components(separatedBy: "/").last ?? "Session"
         let toolName = session.activePermission?.toolName ?? "Unknown"
-        let toolInput = formatToolInput(session.activePermission?.toolInput)
+        let toolInput = session.activePermission?.toolInput
+        let (primaryDetail, secondaryDetail) = formatToolDetails(toolName: toolName, input: toolInput)
 
-        VStack(alignment: .leading, spacing: 10) {
-            // Header: project name
-            HStack {
-                Circle()
-                    .fill(Color(red: 0.85, green: 0.47, blue: 0.34))
-                    .frame(width: 8, height: 8)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 6) {
+                Circle().fill(approvalOrange).frame(width: 8, height: 8)
+                Text("Permission Request")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(approvalOrange.opacity(0.8))
+                Spacer()
                 Text(projectName)
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white)
-                Spacer()
-                Text(toolName)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(Color(red: 0.85, green: 0.47, blue: 0.34))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color(red: 0.85, green: 0.47, blue: 0.34).opacity(0.15))
-                    .cornerRadius(4)
+                    .foregroundColor(.white.opacity(0.4))
             }
+            .padding(.bottom, 10)
 
-            // Tool input details
-            if !toolInput.isEmpty {
-                Text(toolInput)
+            // Tool name + primary detail
+            HStack(spacing: 6) {
+                Image(systemName: toolIcon(for: toolName))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(approvalOrange)
+                Text(toolName)
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundColor(approvalOrange)
+                if !primaryDetail.isEmpty {
+                    Text(primaryDetail)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.bottom, 8)
+
+            // Detail block (command, file content, etc.)
+            if !secondaryDetail.isEmpty {
+                Text(secondaryDetail)
                     .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.7))
-                    .lineLimit(6)
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(Color.white.opacity(0.05))
-                    .cornerRadius(6)
+                    .padding(10)
+                    .background(Color.white.opacity(0.04))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                    )
+                    .padding(.bottom, 12)
+            } else {
+                Spacer().frame(height: 4)
             }
 
-            // Action buttons
-            HStack(spacing: 10) {
-                Spacer()
-
+            // Action buttons — full width
+            HStack(spacing: 8) {
                 Button {
                     sessionMonitor.denyPermission(sessionId: session.sessionId, reason: nil)
                 } label: {
                     Text("Deny")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                        .background(Color.white.opacity(0.1))
+                        .foregroundColor(.white.opacity(0.7))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.08))
                         .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
@@ -522,40 +542,95 @@ struct NotchView: View {
                     Text("Allow")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.black)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                        .background(Color.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.9))
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    sessionMonitor.approvePermissionAlways(sessionId: session.sessionId)
+                } label: {
+                    Text("Always")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(approvalOrange.opacity(0.9))
                         .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(12)
-        .background(Color.white.opacity(0.04))
-        .cornerRadius(10)
-        .padding(.horizontal, 4)
+        .padding(14)
+        .background(Color.white.opacity(0.03))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(approvalOrange.opacity(0.15), lineWidth: 1)
+        )
+        .padding(.horizontal, 2)
     }
 
-    private func formatToolInput(_ input: [String: AnyCodable]?) -> String {
-        guard let input else { return "" }
+    private func toolIcon(for toolName: String) -> String {
+        switch toolName.lowercased() {
+        case "bash": return "terminal"
+        case "edit": return "pencil"
+        case "write": return "doc.text"
+        case "read": return "doc"
+        case "glob", "grep": return "magnifyingglass"
+        case "webfetch", "websearch": return "globe"
+        default: return "gearshape"
+        }
+    }
 
-        // Try common patterns
-        if let command = input["command"]?.value as? String {
-            return command
-        }
-        if let filePath = input["file_path"]?.value as? String {
-            return filePath
-        }
-        if let patterns = input["patterns"]?.value as? [Any], let first = patterns.first as? String {
-            return first
-        }
+    private func formatToolDetails(toolName: String, input: [String: AnyCodable]?) -> (primary: String, secondary: String) {
+        guard let input else { return ("", "") }
 
-        // Fallback: serialize to readable string
-        if let data = try? JSONSerialization.data(withJSONObject: input.mapValues { $0.value }, options: .prettyPrinted),
-           let str = String(data: data, encoding: .utf8) {
-            return str
+        switch toolName.lowercased() {
+        case "bash":
+            let cmd = input["command"]?.value as? String ?? ""
+            // Split: first line as primary, rest as secondary
+            let lines = cmd.components(separatedBy: "\n")
+            if lines.count > 1 {
+                return (lines[0], lines.dropFirst().joined(separator: "\n"))
+            }
+            return ("", cmd)
+
+        case "edit":
+            let filePath = input["file_path"]?.value as? String ?? ""
+            let shortPath = filePath.components(separatedBy: "/").suffix(3).joined(separator: "/")
+            var detail = ""
+            if let oldStr = input["old_string"]?.value as? String {
+                detail += "- " + oldStr.prefix(200)
+            }
+            if let newStr = input["new_string"]?.value as? String {
+                if !detail.isEmpty { detail += "\n" }
+                detail += "+ " + newStr.prefix(200)
+            }
+            return (shortPath, detail)
+
+        case "write":
+            let filePath = input["file_path"]?.value as? String ?? ""
+            let shortPath = filePath.components(separatedBy: "/").suffix(3).joined(separator: "/")
+            let content = input["content"]?.value as? String ?? ""
+            return (shortPath, String(content.prefix(300)))
+
+        case "read":
+            let filePath = input["file_path"]?.value as? String ?? ""
+            return (filePath.components(separatedBy: "/").suffix(3).joined(separator: "/"), "")
+
+        default:
+            if let patterns = input["patterns"]?.value as? [Any], let first = patterns.first as? String {
+                return (first, "")
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: input.mapValues { $0.value }, options: .prettyPrinted),
+               let str = String(data: data, encoding: .utf8) {
+                return ("", str)
+            }
+            return ("", "")
         }
-        return ""
     }
 
     /// Focus the terminal app for the completed session
