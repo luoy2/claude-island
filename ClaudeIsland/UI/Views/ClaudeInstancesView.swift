@@ -88,13 +88,79 @@ struct ClaudeInstancesView: View {
     // MARK: - Actions
 
     private func focusSession(_ session: SessionState) {
-        guard session.isInTmux else { return }
-
         Task {
+            // Try yabai first (for tmux)
             if let pid = session.pid {
-                _ = await YabaiController.shared.focusWindow(forClaudePid: pid)
-            } else {
-                _ = await YabaiController.shared.focusWindow(forWorkingDirectory: session.cwd)
+                let success = await YabaiController.shared.focusWindow(forClaudePid: pid)
+                if success { return }
+            }
+
+            // CGWindowList + Accessibility API fallback
+            await MainActor.run {
+                focusTerminalWindow(for: session)
+            }
+        }
+    }
+
+    @MainActor
+    private func focusTerminalWindow(for session: SessionState) {
+        let projectName = session.cwd.components(separatedBy: "/").last ?? ""
+        let sessionPrefix = String(session.sessionId.prefix(8))
+
+        // Find matching terminal window via CGWindowList
+        if let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] {
+            for window in windowList {
+                guard let ownerName = window[kCGWindowOwnerName as String] as? String,
+                      let windowPid = window[kCGWindowOwnerPID as String] as? Int,
+                      let layer = window[kCGWindowLayer as String] as? Int,
+                      layer == 0,
+                      TerminalAppRegistry.isTerminal(ownerName) else { continue }
+
+                let title = window[kCGWindowName as String] as? String ?? ""
+                if !projectName.isEmpty && (title.contains(sessionPrefix) || title.contains(projectName)) {
+                    let pid = pid_t(windowPid)
+                    NSRunningApplication(processIdentifier: pid)?.activate()
+
+                    // Raise the specific window via Accessibility API
+                    let axApp = AXUIElementCreateApplication(pid)
+                    var windowsRef: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+                       let axWindows = windowsRef as? [AXUIElement] {
+                        for axWindow in axWindows {
+                            var titleRef: CFTypeRef?
+                            AXUIElementCopyAttributeValue(axWindow, kAXTitleAttribute as CFString, &titleRef)
+                            let axTitle = titleRef as? String ?? ""
+                            if axTitle.contains(sessionPrefix) || axTitle.contains(projectName) {
+                                AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
+                                viewModel.notchClose()
+                                return
+                            }
+                        }
+                    }
+                    viewModel.notchClose()
+                    return
+                }
+            }
+        }
+
+        // Fallback: process tree
+        if let claudePid = session.pid {
+            let tree = ProcessTreeBuilder.shared.buildTree()
+            if let termPid = ProcessTreeBuilder.shared.findTerminalPid(forProcess: claudePid, tree: tree) {
+                NSRunningApplication(processIdentifier: pid_t(termPid))?.activate()
+                viewModel.notchClose()
+                return
+            }
+        }
+
+        // Last resort: activate any known terminal
+        for bundleId in ["com.mitchellh.ghostty", "com.googlecode.iterm2", "com.apple.Terminal"] {
+            if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleId }) {
+                app.activate()
+                viewModel.notchClose()
+                return
             }
         }
     }
@@ -279,7 +345,7 @@ struct InstanceRow: View {
         .padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            onChat()
+            onFocus()
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isWaitingForApproval)
         .background(
