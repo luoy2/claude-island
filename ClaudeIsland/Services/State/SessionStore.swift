@@ -326,7 +326,8 @@ actor SessionStore {
                 toolUseId: nextPending.id,
                 toolName: nextPending.name,
                 toolInput: nil,  // We don't have the input stored in chatItems
-                receivedAt: nextPending.timestamp
+                receivedAt: nextPending.timestamp,
+                hasAlways: false
             ))
             if session.phase.canTransition(to: newPhase) {
                 session.phase = newPhase
@@ -390,7 +391,8 @@ actor SessionStore {
                     toolUseId: nextPending.id,
                     toolName: nextPending.name,
                     toolInput: nil,
-                    receivedAt: nextPending.timestamp
+                    receivedAt: nextPending.timestamp,
+                hasAlways: false
                 ))
                 session.phase = newPhase
                 Self.logger.debug("Switched to next pending tool after completion: \(nextPending.id.prefix(12), privacy: .public)")
@@ -428,7 +430,8 @@ actor SessionStore {
                 toolUseId: nextPending.id,
                 toolName: nextPending.name,
                 toolInput: nil,
-                receivedAt: nextPending.timestamp
+                receivedAt: nextPending.timestamp,
+                hasAlways: false
             ))
             if session.phase.canTransition(to: newPhase) {
                 session.phase = newPhase
@@ -464,7 +467,8 @@ actor SessionStore {
                 toolUseId: nextPending.id,
                 toolName: nextPending.name,
                 toolInput: nil,
-                receivedAt: nextPending.timestamp
+                receivedAt: nextPending.timestamp,
+                hasAlways: false
             ))
             if session.phase.canTransition(to: newPhase) {
                 session.phase = newPhase

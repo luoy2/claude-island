@@ -469,6 +469,7 @@ struct NotchView: View {
         let projectName = session.cwd.components(separatedBy: "/").last ?? "Session"
         let toolName = session.activePermission?.toolName ?? "Unknown"
         let toolInput = session.activePermission?.toolInput
+        let showAlways = session.activePermission?.hasAlways ?? false
 
         VStack(alignment: .leading, spacing: 0) {
             // Header line
@@ -525,18 +526,20 @@ struct NotchView: View {
                 }
                 .buttonStyle(.plain)
 
-                Button {
-                    sessionMonitor.approvePermissionAlways(sessionId: session.sessionId)
-                } label: {
-                    Text("Always")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                        .background(approvalOrange)
-                        .cornerRadius(8)
+                if showAlways {
+                    Button {
+                        sessionMonitor.approvePermissionAlways(sessionId: session.sessionId)
+                    } label: {
+                        Text("Always")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(approvalOrange)
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 4)

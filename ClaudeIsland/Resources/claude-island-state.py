@@ -49,39 +49,62 @@ def get_tty():
     return None
 
 
-def add_permission_rules(suggestions):
-    """Add permission rules to ~/.claude/settings.json based on permission_suggestions"""
-    settings_path = os.path.expanduser("~/.claude/settings.json")
-    try:
-        with open(settings_path, "r") as f:
-            settings = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return
+def _resolve_settings_path(destination, cwd=""):
+    """Map CC destination to the correct settings file path"""
+    if destination == "localSettings":
+        return os.path.expanduser("~/.claude/settings.local.json")
+    elif destination == "projectSettings" and cwd:
+        return os.path.join(cwd, ".claude", "settings.json")
+    elif destination == "userSettings":
+        return os.path.expanduser("~/.claude/settings.json")
+    # Default to localSettings (most common for "always allow")
+    return os.path.expanduser("~/.claude/settings.local.json")
 
-    permissions = settings.setdefault("permissions", {})
-    allow_list = permissions.setdefault("allow", [])
 
+def add_permission_rules(suggestions, cwd=""):
+    """Add permission rules based on permission_suggestions, writing to the correct file"""
+    # Group rules by destination file
+    by_file = {}
     for suggestion in suggestions:
-        if suggestion.get("type") != "addRules":
-            continue
-        for rule in suggestion.get("rules", []):
-            tool_name = rule.get("toolName", "")
-            rule_content = rule.get("ruleContent", "")
-            if tool_name and rule_content:
-                entry = f"{tool_name}({rule_content})"
-            elif tool_name:
-                entry = tool_name
-            else:
-                continue
-            if entry not in allow_list:
-                allow_list.append(entry)
+        dest = suggestion.get("destination", "localSettings")
+        behavior = suggestion.get("behavior", "allow")
+        path = _resolve_settings_path(dest, cwd)
+        if path not in by_file:
+            by_file[path] = []
 
-    try:
-        with open(settings_path, "w") as f:
-            json.dump(settings, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-    except OSError:
-        pass
+        if suggestion.get("type") == "addRules":
+            for rule in suggestion.get("rules", []):
+                tool_name = rule.get("toolName", "")
+                rule_content = rule.get("ruleContent", "")
+                if tool_name and rule_content:
+                    entry = f"{tool_name}({rule_content})"
+                elif tool_name:
+                    entry = tool_name
+                else:
+                    continue
+                by_file[path].append((behavior, entry))
+
+    # Write to each settings file
+    for path, rules in by_file.items():
+        try:
+            with open(path, "r") as f:
+                settings = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            settings = {}
+
+        permissions = settings.setdefault("permissions", {})
+        for behavior, entry in rules:
+            rule_list = permissions.setdefault(behavior, [])
+            if entry not in rule_list:
+                rule_list.append(entry)
+
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(settings, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+        except OSError:
+            pass
 
 
 def send_event(state):
@@ -158,6 +181,9 @@ def main():
         state["status"] = "waiting_for_approval"
         state["tool"] = data.get("tool_name")
         state["tool_input"] = tool_input
+        # Signal whether "Always Allow" is available
+        suggestions = data.get("permission_suggestions", [])
+        state["has_always"] = len(suggestions) > 0
         # tool_use_id lookup handled by Swift-side cache from PreToolUse
 
         # Debug log
@@ -204,7 +230,7 @@ def main():
                 }
                 # Also add permanent rule from permission_suggestions
                 suggestions = data.get("permission_suggestions", [])
-                add_permission_rules(suggestions)
+                add_permission_rules(suggestions, cwd=cwd)
                 debug_log(f"Always: approved + added rules from {len(suggestions)} suggestions")
                 print(json.dumps(output))
                 sys.exit(0)
