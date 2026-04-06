@@ -125,12 +125,28 @@ def main():
         state["tool_input"] = tool_input
         # tool_use_id lookup handled by Swift-side cache from PreToolUse
 
+        # Debug log
+        import datetime
+        log_path = "/tmp/claude-island-hook-debug.log"
+        def debug_log(msg):
+            with open(log_path, "a") as f:
+                f.write(f"[{datetime.datetime.now().isoformat()}] {msg}\n")
+
+        debug_log(f"PermissionRequest received: tool={state.get('tool')} input_keys={list(tool_input.keys())}")
+        debug_log(f"Full hook data keys: {list(data.keys())}")
+        if "permission_suggestions" in data:
+            debug_log(f"permission_suggestions: {json.dumps(data['permission_suggestions'])}")
+
         # Send to app and wait for decision
         response = send_event(state)
+
+        debug_log(f"Response from app: {json.dumps(response) if response else 'None'}")
 
         if response:
             decision = response.get("decision", "ask")
             reason = response.get("reason", "")
+
+            debug_log(f"Decision: {decision}, Reason: {reason}")
 
             if decision in ("allow", "always"):
                 output = {
@@ -139,6 +155,7 @@ def main():
                         "decision": {"behavior": decision},
                     }
                 }
+                debug_log(f"Sending to CC stdout: {json.dumps(output)}")
                 print(json.dumps(output))
                 sys.exit(0)
 
@@ -152,9 +169,11 @@ def main():
                         },
                     }
                 }
+                debug_log(f"Sending to CC stdout: {json.dumps(output)}")
                 print(json.dumps(output))
                 sys.exit(0)
 
+        debug_log("No valid response, falling through to ask")
         # No response or "ask" - let Claude Code show its normal UI
         sys.exit(0)
 
