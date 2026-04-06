@@ -415,7 +415,7 @@ class HookSocketServer {
             return
         }
 
-        logger.debug("Received: \(event.event, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public)")
+        logger.debug("Received: \(event.event, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public) hasAlways=\(String(describing: event.hasAlways), privacy: .public)")
 
         if event.event == "PreToolUse" {
             cacheToolUseId(event: event)
@@ -451,7 +451,8 @@ class HookSocketServer {
                 toolInput: event.toolInput,
                 toolUseId: toolUseId,  // Use resolved toolUseId
                 notificationType: event.notificationType,
-                message: event.message
+                message: event.message,
+                hasAlways: event.hasAlways
             )
 
             let pending = PendingPermission(
