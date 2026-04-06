@@ -49,6 +49,41 @@ def get_tty():
     return None
 
 
+def add_permission_rules(suggestions):
+    """Add permission rules to ~/.claude/settings.json based on permission_suggestions"""
+    settings_path = os.path.expanduser("~/.claude/settings.json")
+    try:
+        with open(settings_path, "r") as f:
+            settings = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+
+    permissions = settings.setdefault("permissions", {})
+    allow_list = permissions.setdefault("allow", [])
+
+    for suggestion in suggestions:
+        if suggestion.get("type") != "addRules":
+            continue
+        for rule in suggestion.get("rules", []):
+            tool_name = rule.get("toolName", "")
+            rule_content = rule.get("ruleContent", "")
+            if tool_name and rule_content:
+                entry = f"{tool_name}({rule_content})"
+            elif tool_name:
+                entry = tool_name
+            else:
+                continue
+            if entry not in allow_list:
+                allow_list.append(entry)
+
+    try:
+        with open(settings_path, "w") as f:
+            json.dump(settings, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+    except OSError:
+        pass
+
+
 def send_event(state):
     """Send event to app, return response if any"""
     try:
@@ -148,14 +183,29 @@ def main():
 
             debug_log(f"Decision: {decision}, Reason: {reason}")
 
-            if decision in ("allow", "always"):
+            if decision == "allow":
                 output = {
                     "hookSpecificOutput": {
                         "hookEventName": "PermissionRequest",
-                        "decision": {"behavior": decision},
+                        "decision": {"behavior": "allow"},
                     }
                 }
                 debug_log(f"Sending to CC stdout: {json.dumps(output)}")
+                print(json.dumps(output))
+                sys.exit(0)
+
+            elif decision == "always":
+                # Approve this request immediately
+                output = {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PermissionRequest",
+                        "decision": {"behavior": "allow"},
+                    }
+                }
+                # Also add permanent rule from permission_suggestions
+                suggestions = data.get("permission_suggestions", [])
+                add_permission_rules(suggestions)
+                debug_log(f"Always: approved + added rules from {len(suggestions)} suggestions")
                 print(json.dumps(output))
                 sys.exit(0)
 
