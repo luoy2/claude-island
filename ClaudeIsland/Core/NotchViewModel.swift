@@ -64,11 +64,11 @@ class NotchViewModel: ObservableObject {
 
     /// Dynamic opened size based on content type
     var openedSize: CGSize {
-        // Permission approval — wider panel for approve/deny buttons
+        // Permission approval — compact, content-driven height
         if openReason == .notification && hasPendingPermission {
             return CGSize(
                 width: min(screenRect.width * 0.45, 500),
-                height: 350
+                height: 220
             )
         }
 

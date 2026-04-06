@@ -495,20 +495,19 @@ struct NotchView: View {
 
             // Detail content (diff, command, etc.)
             toolDetailView(toolName: toolName, input: toolInput)
+                .padding(.bottom, 14)
 
-            Spacer(minLength: 8)
-
-            // Buttons pinned at bottom
+            // Buttons — follow content directly
             HStack(spacing: 8) {
                 Button {
                     sessionMonitor.denyPermission(sessionId: session.sessionId, reason: nil)
                 } label: {
                     Text("Deny")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white.opacity(0.6))
+                        .foregroundColor(.white.opacity(0.5))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                        .background(Color.white.opacity(0.07))
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.06))
                         .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
@@ -518,10 +517,10 @@ struct NotchView: View {
                 } label: {
                     Text("Allow")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.black)
+                        .foregroundColor(.white.opacity(0.9))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                        .background(Color.white.opacity(0.9))
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.12))
                         .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
